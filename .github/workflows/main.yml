@@ -11,4 +11,4 @@ jobs:
   sonarqube-analysis:
     uses: ./.github/workflows/sonarqube-analysis.yml
     secrets:
-      sonar_token: ${{ secrets.SONAR_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
