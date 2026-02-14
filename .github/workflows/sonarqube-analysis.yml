@@ -52,12 +52,11 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          # Use `&` to invoke and backticks for line continuation
           & .\.sonar\scanner\dotnet-sonarscanner begin `
             /k:"FreakyF_Cryptie" `
             /o:"freakyf" `
             /d:sonar.host.url="https://sonarcloud.io" `
-            /d:sonar.login="$env:SONAR_TOKEN" `
+            /d:sonar.token="$env:SONAR_TOKEN" `
             /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" `
             /d:sonar.verbose=true
 
@@ -76,5 +75,4 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          & .\.sonar\scanner\dotnet-sonarscanner end `
-            /d:sonar.login="$env:SONAR_TOKEN"
+          & .\.sonar\scanner\dotnet-sonarscanner end /d:sonar.token="$env:SONAR_TOKEN"
