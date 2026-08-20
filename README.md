@@ -1,93 +1,116 @@
-# Cryptie | End-to-End Encrypted Messaging System
+# Cryptie
 
-A cross-platform, zero-knowledge messaging architecture utilizing hybrid RSA/AES cryptography and real-time signal propagation to ensure confidentiality, integrity, and non-repudiation of communications.
+A desktop instant messenger for one-to-one conversations, with message content encrypted on the sender's machine, built as an Avalonia client and an ASP.NET Core server over a shared class library.
 
-## 📺 Demo & Visuals
-*Visual representation of the system in operation.*
+![Conversation view in dark mode](/docs/screenshots/Home%20Screen%20-%20Dark%20Mode.png)
 
-### 🔐 Authentication & Security Onboarding
-*Multifactor authentication flow and cryptographic identity initialization.*
+## Overview
 
-* **Registration & Login:** ![Register](/docs/screenshots/Register.png) ![Login](/docs/screenshots/Login.png)
-* **Identity Protection (MFA & PIN):** ![Qr Code](/docs/screenshots/Qr%20Code.png) ![One Time Password](/docs/screenshots/One%20Time%20Password.png) ![Pin Code](/docs/screenshots/Pin%20Code.png)
-* **System State:** ![Loading](/docs/screenshots/Loading.png)
+Every account holds an RSA-2048 key pair, generated on the client at registration as a self-signed X.509 certificate. A conversation has one AES key, wrapped separately under each participant's certificate. Message content is encrypted before it leaves the client, so the server routes and stores it without holding the conversation key.
 
-### 💬 Core Interface & User Experience
-*Cross-platform UI utilizing Avalonia for native-like performance and responsive design.*
+Signing in takes three steps: a password, a time-based one-time code, and a six-digit PIN. The private key is kept on the server, encrypted on the client under a key derived from the PIN by SHA-256, and fetched and decrypted again at each sign-in. The PIN itself is never sent. A control value stored beside the key lets the client verify the PIN before it decrypts the key itself.
 
-* **Main Dashboard:** ![Home Screen - No Friends](/docs/screenshots/Home%20Screen%20-%20No%20Friends.png)
-* **Theme Support (Dark Mode):** ![Home Screen - Dark Mode](/docs/screenshots/Home%20Screen%20-%20Dark%20Mode.png)
-* **Account & Configuration:** ![Account](/docs/screenshots/Account.png) ![Settings](/docs/screenshots/Settings.png)
+Built as coursework for a university course on defensive programming, on a self-chosen topic. Complete, with no further development planned.
 
-## 🏗️ Architecture & Context
-*High-level system design and structural logic.*
+## Scope
 
-* **Objective:** Provision of a secure communication platform where the server functions as a stateless relay, possessing zero access to plaintext message content or user private keys.
-* **Architecture Pattern:**
-    * **Client:** MVVM (Model-View-ViewModel) architecture leveraging ReactiveUI for state management and Avalonia for cross-platform rendering.
-    * **Server:** Service-Oriented Architecture (SOA) utilizing ASP.NET Core for resource management and SignalR for real-time event distribution.
-* **Data Flow:**
-    1.  **Identity:** RSA-2048 key pairs are generated locally. The public key is registered on the server; the private key is encrypted via AES (PIN-derived hash) and persisted in the OS Keychain.
-    2.  **Key Exchange:** Session keys (AES-256) are generated per conversation and exchanged using the recipient's RSA public key.
-    3.  **Transport:** Payloads are encrypted locally and transmitted via SignalR. The server persists ciphertext in PostgreSQL for asynchronous delivery but remains incapable of decryption.
+Cryptie covers registration with two-factor enrolment, contacts, one-to-one conversations, real-time delivery and message history, on a client and a server that were run on one machine.
 
-## ⚖️ Design Decisions & Trade-offs
-*Technical justifications for architectural choices.*
+Conversations are created as private two-person chats when a contact is added, and there is no way to add a third person to one. Message deletion, editing, attachments and read receipts are outside the scope. There is no deployment story beyond a local run, and the system has never had users beyond local testing.
 
-* **Cryptography: RSA-2048 over ECC (Elliptic Curve Cryptography)**
-    * **Context:** Selection of an asymmetric primitive for identity and key encapsulation that must interface with hardware-backed security modules.
-    * **Decision:** Implementation of RSA-2048 utilizing PKCS#1 v2.1 (OAEP) padding.
-    * **Rationale:** RSA-2048 was selected to leverage hardware-accelerated key generation within TPM 2.0 modules and Secure Enclaves. Many consumer-grade TPMs lack native, hardware-isolated support for Ed25519, making RSA the only viable option for ensuring private keys are non-exportable from the silicon level.
-    * **Trade-off:** Accepted significantly larger key sizes and higher computational latency compared to ECC, which directly necessitated a custom segmentation strategy to bypass OS-level storage limits for cryptographic assets.
+## Features
 
-* **Persistence: OS-Native Secure Storage**
-    * **Context:** Protection of private keys against local exfiltration by malicious processes.
-    * **Decision:** Offloading key persistence to hardware-backed modules (Windows Credential Manager, macOS Keychain, Linux Keyring).
-    * **Rationale:** Ensures that cryptographic assets are managed by the operating system's security kernel rather than the application’s file system.
-    * **Trade-off:** Increased implementation complexity due to platform-specific storage quotas (e.g., the 2560-byte limit on certain Windows versions), requiring a chunking abstraction layer.
+- Registration with a login, a display name, an e-mail, a password and a six-digit PIN, generating the key pair on the client
+- Mandatory two-factor authentication, with the server issuing a provisioning URI that the client renders as a QR code
+- Private key held in the operating system credential store, split across entries with a metadata entry holding the count
+- Contacts added by login name, which creates the conversation and establishes its key for both sides in one step
+- Messages encrypted with the conversation key before they leave the client, with a fresh initialisation vector each time and a 2 000-character limit
+- Real-time delivery over a WebSocket hub, message history on opening a conversation with a fallback retrieval path, and a conversation list ordered by most recent activity
+- A waiting screen when the server is unreachable, retrying at one second, then ten, then thirty, and resuming when it answers
+- Account lockout after repeated failed sign-ins, applied identically to logins that do not exist
+- Authentication responses padded up to a 100 ms floor, and a token-bucket rate limiter partitioned per caller
+- Password rules checked before submission, display name changes, a local sign-out that clears the machine, and default, light and dark themes
 
-* **Relay Strategy: Stateless Server-side Persistence**
-    * **Context:** Balancing high availability with zero-knowledge requirements.
-    * **Decision:** The server persists encrypted blobs until delivery is acknowledged by the recipient.
-    * **Rationale:** Decouples message delivery from client uptime, allowing for reliable asynchronous communication.
-    * **Trade-off:** The server stores metadata (sender/receiver IDs and timestamps), which is a necessary compromise to facilitate message routing without decryption.
+## Tech stack
 
-## 🧠 Engineering Challenges
-*Analysis of non-trivial technical hurdles and resolutions.*
+C# on .NET 9, nullable reference types enabled in every project.
 
-* **Challenge: Ensuring Causal Consistency in Asynchronous Delivery**
-    * **Problem:** Messages arriving via different transport paths (SignalR vs. REST history) or during intermittent connectivity frequently result in "out-of-order" rendering or missing conversation gaps.
-    * **Implementation:** Developed a **Hash-Linked Sequencing** mechanism. Each message contains a monotonically increasing sequence number and the hash of the preceding message. The client-side logic verifies this chain upon receipt.
-    * **Outcome:** The system automatically detects gaps in the message chain. If a sequence break is identified, the client triggers a selective re-synchronization request for the missing indices, ensuring total causal ordering without server-side knowledge of the conversation state.
+| Area | Libraries |
+|---|---|
+| Client | Avalonia UI 11.3 with ReactiveUI for MVVM and routing, the Semi theme, `Mapster`, `QRCoder`, `KeySharp` for the operating system credential store, the .NET X.509 and cryptographic message syntax APIs, the SignalR client with automatic reconnection |
+| Server | ASP.NET Core 9 with attribute-routed controllers, SignalR over WebSockets, Entity Framework Core 9 with `Npgsql`, `BCrypt.Net-Next`, `Otp.NET`, `Docker.DotNet`, OpenAPI with a Scalar reference page in development |
+| Shared | `FluentValidation`, twelve entities and forty-two request and response types |
+| Data store | PostgreSQL, with the schema expressed through entities using explicit snake_case table and column names |
+| Testing | The xUnit harness with `Moq`, `NSubstitute` and `FluentAssertions`, the Entity Framework Core in-memory provider, `coverlet` |
 
-* **Challenge: Mitigating Side-Channel Timing Attacks**
-    * **Problem:** Discrepancies in execution time during authentication (e.g., verifying a hash vs. immediate rejection for non-existent users) allow attackers to enumerate valid usernames.
-    * **Implementation:** Implementation of a `DelayService` that enforces a constant-time floor for all security-sensitive operations. The service measures execution duration and injects precise micro-delays to normalize response latency.
-    * **Outcome:** Statistical distribution of response times is identical regardless of input validity, neutralizing username enumeration through timing analysis.
+The client builds for `win-x64`, `linux-x64`, `osx-x64` and `osx-arm64`. The macOS targets publish as self-contained single-file builds, and a script assembles them into an application bundle. GitHub Actions runs a SonarCloud analysis on pushes to the main branch and on pull requests. There is no container image and no deployment workflow.
 
-* **Challenge: Handling Hardware Storage Quotas (Keychain Chunking)**
-    * **Problem:** Platform-specific credential managers enforce strict size limits that are insufficient for full RSA private key assets and metadata.
-    * **Implementation:** Engineered a `KeychainManagerService` that segments large secrets into 1KB chunks. A primary "Meta" entry tracks chunk count and parity, while individual segments are distributed across sequential slots.
-    * **Outcome:** Reliable persistence of cryptographic material across Windows, macOS, and Linux without triggering platform-specific overflow exceptions.
+## Architecture
 
-## 🛠️ Tech Stack & Ecosystem
-* **Core:** .NET 9 (C#)
-* **Client UI:** Avalonia UI, ReactiveUI
-* **Server Runtime:** ASP.NET Core 9, Docker
-* **Persistence:** PostgreSQL, Entity Framework Core
-* **Communication:** SignalR (WebSockets), HTTP/2
-* **Cryptography:** BouncyCastle, System.Security.Cryptography
-* **Infrastructure:** Testcontainers (Integration Testing)
+Two runnable programs over one shared library. The client never touches the database, and the only compile-time coupling between the two is the shared library.
 
-## 🧪 Quality & Standards
-* **Testing Strategy:**
-    * **Unit Testing:** xUnit for isolation of cryptographic primitives and business logic.
-    * **Integration Testing:** **Testcontainers** is utilized to deploy ephemeral PostgreSQL instances, ensuring validation against a production-grade schema during CI/CD.
-* **Engineering Principles:**
-    * **Zero Knowledge:** Architecture enforces client-side encryption; keys are never transmitted to or stored on the server.
-    * **Security by Design:** Mandatory 2FA (TOTP) and constant-time execution floors for all authentication vectors.
+| Project | Responsibility |
+|---|---|
+| `Cryptie.Client` | Avalonia desktop application. Views, view models, navigation, typed HTTP clients, all client-side cryptography |
+| `Cryptie.Common` | Entities, request and response types, validation rules. Referenced by both sides |
+| `Cryptie.Server` | Controllers, one service per feature area, a single data access service, the SignalR hub |
+| `Cryptie.*.Tests` | One test project per source project |
 
-## 🙋‍♂️ Authors
+```mermaid
+flowchart LR
+    client[Avalonia desktop client] -- HTTPS/JSON --> api[ASP.NET Core API]
+    client -- WebSocket --> hub[SignalR message hub]
+    api --> db[(PostgreSQL)]
+    api -- push --> hub
+    client -.-> keyring[OS credential store]
+```
+
+**Layers.** Controllers are thin and delegate to one service per feature area. Those services share a single data access service that owns every query, over one Entity Framework Core context exposed to them as an interface. On the client, views bind to view models through compiled bindings, view models are resolved from a dependency injection container and located by a naming convention, and server access is split into eight typed HTTP clients pointed at one configured base address.
+
+**Two channels.** Persistent operations and history go over HTTP as JSON. Live delivery goes over the hub, where a client joins a group named by the conversation identifier and the server pushes each stored message to that group. The connection reconnects automatically, and a background loop polls a health endpoint every five seconds so the shell can show a waiting screen and resume. The surface is 18 endpoints across six controllers plus three hub methods.
+
+| Route | Purpose |
+|---|---|
+| `POST /auth/register` | Account creation, returns a provisioning URI and a two-factor token |
+| `POST /auth/login` | Password check, returns a token valid for five minutes |
+| `POST /auth/totp` | One-time code check, returns the session token |
+| `GET /user/privateKey` | The encrypted private key and control value |
+| `POST /user/addfriend` | Creates the conversation and stores one wrapped key per member |
+| `POST /user/userdisplayname` | Display name change |
+| `POST /group/groupsNames` | Conversation names, resolved to the other participant for private chats |
+| `POST /messages/send` | Stores a message and broadcasts it over the hub |
+| `GET /messages/get-all` | History for a conversation |
+| `POST /messages/get-all-since` | History from a timestamp, used as the fallback path |
+| `POST /status/server` | Liveness, polled by the client |
+
+## Testing
+
+422 test methods across 98 test files, run under xUnit with coverage collected in OpenCover format and reported to SonarCloud.
+
+| Area | What they check |
+|---|---|
+| Client | View models, services, converters and the cryptographic helpers, over mocked dependencies |
+| Shared | Entities, request and response types, and every validation rule |
+| Server | Controllers and services over the in-memory provider and hand-written context doubles |
+
+## Screenshots
+
+![Two-factor enrolment with a QR code](/docs/screenshots/Qr%20Code.png)
+
+![Registration form](/docs/screenshots/Register.png)
+
+## Project structure
+
+```text
+src/
+  Cryptie.Client        Avalonia desktop application
+  Cryptie.Common        entities, transfer objects and validators shared by both sides
+  Cryptie.Server        ASP.NET Core API and SignalR hub
+  Cryptie.*.Tests       one test project per source project
+docs/screenshots        images of the running client
+```
+
+## Authors
 
 **Kamil Fudala**
 
@@ -104,6 +127,6 @@ A cross-platform, zero-knowledge messaging architecture utilizing hybrid RSA/AES
 - [GitHub](https://github.com/JakubKross)
 - [LinkedIn](https://www.linkedin.com/in/jakub-babiarski-751611304/)
 
-## ⚖️ License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
