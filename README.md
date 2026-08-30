@@ -120,13 +120,10 @@ docs/screenshots        images of the running client
 **Jan Chojnacki**
 
 - [GitHub](https://github.com/Jan-Chojnacki)
-- [LinkedIn](https://www.linkedin.com/in/jan-chojnacki-772b0530a/)
+- [LinkedIn](https://www.linkedin.com/in/jan-chojnacki-dev/)
 
 **Jakub Babiarski**
 
 - [GitHub](https://github.com/JakubKross)
 - [LinkedIn](https://www.linkedin.com/in/jakub-babiarski-751611304/)
 
-## License
-
-This project is licensed under the [MIT License](LICENSE).
